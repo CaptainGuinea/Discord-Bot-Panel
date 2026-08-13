@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
 # Creates an LXC container on a Proxmox VE host and installs BotPanel into it.
+# Uses whiptail dialogs (like the Proxmox community scripts): pick Default
+# Install for sensible defaults or Advanced Install to change every setting.
 #
 # Run on the Proxmox host shell:
 #
 #   bash -c "$(wget -qO- https://raw.githubusercontent.com/CaptainGuinea/Discord-Bot-Panel/main/scripts/proxmox-lxc.sh)"
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/CaptainGuinea/Discord-Bot-Panel/main/scripts/proxmox-lxc.sh)"
 #
-# The `bash -c "$(...)"` form matters: piping into bash would consume stdin and
-# the prompts below could not read your answers.
-#
-# Every prompt can be preset, which also makes the run non-interactive:
+# Every setting can be preset with an environment variable, and ASSUME_YES=1
+# skips the dialogs entirely for fully non-interactive runs:
 #
 #   CTID=210 CT_HOSTNAME=bots DISK_GB=12 RAM_MB=2048 CORES=2 \
 #   STORAGE=local-lvm BRIDGE=vmbr0 ASSUME_YES=1 \
@@ -33,28 +33,24 @@ CT_HOSTNAME="${CT_HOSTNAME:-botpanel}"
 BRIDGE="${BRIDGE:-vmbr0}"
 NET_CONFIG="${NET_CONFIG:-dhcp}"     # dhcp, or CIDR such as 192.168.1.50/24
 GATEWAY="${GATEWAY:-}"               # required when NET_CONFIG is not dhcp
+VLAN="${VLAN:-}"                     # optional VLAN tag
 PANEL_PORT="${PANEL_PORT:-8080}"
 UNPRIVILEGED="${UNPRIVILEGED:-1}"
 START_ON_BOOT="${START_ON_BOOT:-1}"
 CT_PASSWORD="${CT_PASSWORD:-}"       # empty means console access only
 ASSUME_YES="${ASSUME_YES:-0}"
 
+APP="BotPanel"
+BACKTITLE="BotPanel LXC installer"
+
 bold()  { printf '\n\033[1m%s\033[0m\n' "$1"; }
 info()  { printf '  \033[36m→\033[0m %s\n' "$1"; }
 ok()    { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 warn()  { printf '  \033[33m!\033[0m %s\n' "$1"; }
 fail()  { printf '\n  \033[31m✗ %s\033[0m\n\n' "$1" >&2; exit 1; }
-
-ask() {
-  # ask <prompt> <default> <variable name>; skipped when the value is preset
-  local prompt="$1" default="$2" varname="$3" answer
-  if [[ "$ASSUME_YES" == "1" || ! -t 0 ]]; then
-    printf '  %s: \033[1m%s\033[0m\n' "$prompt" "$default"
-    return
-  fi
-  read -rp "  $(printf '%-28s' "$prompt")[$default]: " answer </dev/tty || true
-  [[ -n "$answer" ]] && printf -v "$varname" '%s' "$answer"
-}
+# Printed to stderr and exits non-zero so it also aborts the script when a
+# dialog was cancelled inside a $(...) command substitution.
+cancel(){ printf '\n  \033[33mInstallation cancelled — nothing was changed.\033[0m\n\n' >&2; exit 1; }
 
 # --- Host checks -------------------------------------------------------------
 
@@ -62,57 +58,228 @@ ask() {
 command -v pct >/dev/null 2>&1 || fail "This script must run on a Proxmox VE host (pct was not found)."
 command -v pvesm >/dev/null 2>&1 || fail "pvesm was not found. Is this a Proxmox VE host?"
 
-bold "BotPanel — Proxmox LXC installer"
-info "Proxmox $(pveversion | cut -d/ -f2)"
-
-# --- Container ID ------------------------------------------------------------
-
-if [[ -z "${CTID:-}" ]]; then
-  CTID="$(pvesh get /cluster/nextid 2>/dev/null || echo 200)"
-fi
-ask "Container ID" "$CTID" CTID
-
-if pct status "$CTID" >/dev/null 2>&1; then
-  fail "Container $CTID already exists. Choose a different ID with CTID=<id>."
+INTERACTIVE=1
+if [[ "$ASSUME_YES" == "1" ]] || ! command -v whiptail >/dev/null 2>&1 || ! { : </dev/tty; } 2>/dev/null; then
+  INTERACTIVE=0
 fi
 
-# --- Storage -----------------------------------------------------------------
+# --- Dialog helpers ----------------------------------------------------------
+# All whiptail calls read/draw on /dev/tty so the script works when its body is
+# fetched with wget/curl. The chosen value comes back on stdout via the fd swap.
+
+wt() {
+  whiptail --backtitle "$BACKTITLE" "$@" 3>&1 1>&2 2>&3 </dev/tty >/dev/tty
+}
+
+# wt_msg <title> <text> <height> <width> — informational box; ESC just closes it
+wt_msg() {
+  wt --title "$1" --msgbox "$2" "$3" "$4" || true
+}
+
+# wt_input <title> <prompt> <default> -> echoes the value, exits on Cancel
+wt_input() {
+  local value
+  value=$(wt --title "$1" --inputbox "$2" 11 62 "$3") || cancel
+  echo "$value"
+}
+
+# ask_int <title> <prompt> <default> <min> [max]
+ask_int() {
+  local title="$1" prompt="$2" default="$3" min="$4" max="${5:-}" value
+  while true; do
+    value=$(wt_input "$title" "$prompt" "$default")
+    if [[ "$value" =~ ^[0-9]+$ ]] && (( value >= min )) && { [[ -z "$max" ]] || (( value <= max )); }; then
+      echo "$value"; return
+    fi
+    wt_msg "Invalid value" "'${value}' is not valid here.\n\nEnter a whole number$( [[ -n "$max" ]] && echo " between ${min} and ${max}" || echo " of at least ${min}" )." 11 62
+  done
+}
+
+valid_ipv4() {
+  local ip="$1" o
+  [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+  for o in ${ip//./ }; do (( o <= 255 )) || return 1; done
+}
+
+valid_cidr() {
+  [[ "$1" == */* ]] || return 1
+  valid_ipv4 "${1%/*}" || return 1
+  [[ "${1#*/}" =~ ^[0-9]{1,2}$ ]] && (( ${1#*/} >= 1 && ${1#*/} <= 32 ))
+}
+
+# --- Gather host facts (storage, bridges, next free ID) ------------------------
 
 mapfile -t ROOT_STORAGES < <(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 {print $1}')
 [[ ${#ROOT_STORAGES[@]} -gt 0 ]] || fail "No storage on this host accepts container volumes."
-
-STORAGE="${STORAGE:-${ROOT_STORAGES[0]}}"
-if [[ ${#ROOT_STORAGES[@]} -gt 1 ]]; then
-  info "Container storage available: ${ROOT_STORAGES[*]}"
-fi
-ask "Container storage" "$STORAGE" STORAGE
-
-printf '%s\n' "${ROOT_STORAGES[@]}" | grep -qx "$STORAGE" \
-  || fail "Storage '$STORAGE' cannot hold containers. Options: ${ROOT_STORAGES[*]}"
 
 mapfile -t TEMPLATE_STORAGES < <(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 {print $1}')
 [[ ${#TEMPLATE_STORAGES[@]} -gt 0 ]] || fail "No storage on this host holds container templates."
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-${TEMPLATE_STORAGES[0]}}"
 
-# --- Remaining settings ------------------------------------------------------
+mapfile -t BRIDGES < <(ls /sys/class/net 2>/dev/null | grep -E '^vmbr[0-9]+$' | sort -V)
+[[ ${#BRIDGES[@]} -gt 0 ]] && BRIDGE="${BRIDGE:-${BRIDGES[0]}}"
 
-ask "Hostname" "$CT_HOSTNAME" CT_HOSTNAME
-ask "Disk size (GB)" "$DISK_GB" DISK_GB
-ask "Memory (MB)" "$RAM_MB" RAM_MB
-ask "CPU cores" "$CORES" CORES
-ask "Network bridge" "$BRIDGE" BRIDGE
-ask "IP (dhcp or CIDR)" "$NET_CONFIG" NET_CONFIG
+STORAGE_PRESET="${STORAGE:-}"
+STORAGE="${STORAGE:-${ROOT_STORAGES[0]}}"
 
-if [[ "$NET_CONFIG" != "dhcp" ]]; then
-  [[ "$NET_CONFIG" == */* ]] || fail "A static address needs a prefix, for example 192.168.1.50/24."
-  if [[ -z "$GATEWAY" ]]; then
-    GATEWAY="$(ip route | awk '/^default/ {print $3; exit}')"
+if [[ -z "${CTID:-}" ]]; then
+  CTID="$(pvesh get /cluster/nextid 2>/dev/null || echo 200)"
+fi
+
+# pick_storage <title> <storage list...> -> radiolist when there is a choice
+pick_storage() {
+  local title="$1"; shift
+  local current="$1"; shift
+  local items=() s size
+  for s in "$@"; do
+    size="$(pvesm status 2>/dev/null | awk -v s="$s" '$1==s {printf "%.1fG free", $6/1024/1024; exit}')"
+    items+=("$s" "${size:-storage}" "$( [[ "$s" == "$current" ]] && echo ON || echo OFF )")
+  done
+  wt --title "$title" --radiolist "Choose with SPACE, confirm with ENTER." 16 62 "$(( $# > 8 ? 8 : $# ))" "${items[@]}" || cancel
+}
+
+# --- Advanced dialog flow ------------------------------------------------------
+
+advanced_settings() {
+  while true; do
+    CTID=$(ask_int "Container ID" "Unique ID for the new container.\nNext free ID on this host: ${CTID}" "$CTID" 100 999999999)
+    pct status "$CTID" >/dev/null 2>&1 || break
+    wt_msg "ID in use" "Container ${CTID} already exists.\nPick a different ID." 9 50
+  done
+
+  while true; do
+    CT_HOSTNAME=$(wt_input "Hostname" "Hostname for the container." "$CT_HOSTNAME")
+    [[ "$CT_HOSTNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] && break
+    wt_msg "Invalid hostname" "'${CT_HOSTNAME}' is not a valid hostname.\n\nUse letters, digits and dashes only." 10 60
+  done
+
+  DISK_GB=$(ask_int "Disk size" "Root disk size in GB.\nBotPanel itself needs about 1 GB; add room for your bots." "$DISK_GB" 4)
+  CORES=$(ask_int "CPU cores" "Number of CPU cores." "$CORES" 1 "$(nproc)")
+  RAM_MB=$(ask_int "Memory" "Memory in MB.\n1024 MB is enough for the panel and a few bots." "$RAM_MB" 256)
+  SWAP_MB=$(ask_int "Swap" "Swap in MB (0 to disable)." "$SWAP_MB" 0)
+
+  if [[ ${#ROOT_STORAGES[@]} -gt 1 ]]; then
+    STORAGE=$(pick_storage "Container storage" "$STORAGE" "${ROOT_STORAGES[@]}")
   fi
-  ask "Gateway" "$GATEWAY" GATEWAY
-  [[ -n "$GATEWAY" ]] || fail "A gateway is required for a static address."
+
+  if [[ ${#BRIDGES[@]} -gt 1 ]]; then
+    local items=() b
+    for b in "${BRIDGES[@]}"; do
+      items+=("$b" "bridge" "$( [[ "$b" == "$BRIDGE" ]] && echo ON || echo OFF )")
+    done
+    BRIDGE=$(wt --title "Network bridge" --radiolist "Choose with SPACE, confirm with ENTER." 16 62 "$(( ${#BRIDGES[@]} > 8 ? 8 : ${#BRIDGES[@]} ))" "${items[@]}") || cancel
+  fi
+
+  local ip_mode
+  ip_mode=$(wt --title "IPv4 address" --menu "How should the container get its address?" 12 62 2 \
+    "dhcp"   "Automatic (recommended)" \
+    "static" "Enter a fixed address" ) || cancel
+
+  if [[ "$ip_mode" == "static" ]]; then
+    while true; do
+      NET_CONFIG=$(wt_input "Static address" "Address in CIDR form, for example 192.168.1.50/24" "$( [[ "$NET_CONFIG" == dhcp ]] && echo "" || echo "$NET_CONFIG" )")
+      valid_cidr "$NET_CONFIG" && break
+      wt_msg "Invalid address" "'${NET_CONFIG}' is not valid.\n\nUse address/prefix form, for example 192.168.1.50/24." 10 62
+    done
+    [[ -z "$GATEWAY" ]] && GATEWAY="$(ip route | awk '/^default/ {print $3; exit}')"
+    while true; do
+      GATEWAY=$(wt_input "Gateway" "IPv4 gateway for this network." "$GATEWAY")
+      valid_ipv4 "$GATEWAY" && break
+      wt_msg "Invalid gateway" "'${GATEWAY}' is not a valid IPv4 address." 9 55
+    done
+  else
+    NET_CONFIG="dhcp"
+  fi
+
+  while true; do
+    VLAN=$(wt_input "VLAN tag" "VLAN tag for the network interface.\nLeave empty for none." "$VLAN")
+    [[ -z "$VLAN" || ( "$VLAN" =~ ^[0-9]+$ && "$VLAN" -ge 1 && "$VLAN" -le 4094 ) ]] && break
+    wt_msg "Invalid VLAN" "'${VLAN}' is not a valid VLAN tag (1-4094)." 9 55
+  done
+
+  PANEL_PORT=$(ask_int "Panel port" "Port the BotPanel web interface listens on." "$PANEL_PORT" 1 65535)
+
+  if wt --title "Container type" --yes-button "Unprivileged" --no-button "Privileged" \
+       --yesno "Create an unprivileged container?\n\nUnprivileged is safer and recommended." 11 62; then
+    UNPRIVILEGED=1
+  else
+    UNPRIVILEGED=0
+  fi
+
+  if wt --title "Start on boot" --yesno "Start the container automatically when the Proxmox host boots?" 9 62; then
+    START_ON_BOOT=1
+  else
+    START_ON_BOOT=0
+  fi
+
+  CT_PASSWORD=$(wt --title "Root password" --passwordbox "Root password for the container.\nLeave empty for console-only access (pct enter ${CTID})." 11 62) || cancel
+}
+
+# --- Choose install mode -------------------------------------------------------
+
+if [[ "$INTERACTIVE" == "1" ]]; then
+  CHOICE=$(wt --title "${APP} LXC installer" --menu "\
+This installs ${APP} into a new LXC container.\n\nDefault settings:\n\n\
+  Container ID   ${CTID}\n\
+  Hostname       ${CT_HOSTNAME}\n\
+  Disk / Cores   ${DISK_GB} GB / ${CORES}\n\
+  Memory / Swap  ${RAM_MB} MB / ${SWAP_MB} MB\n\
+  Storage        ${STORAGE}\n\
+  Network        ${BRIDGE}, DHCP, unprivileged\n" 24 62 3 \
+    "1" "Default Install (use settings above)" \
+    "2" "Advanced Install (change every setting)" \
+    "3" "Exit") || cancel
+  case "$CHOICE" in
+    1) : ;;
+    2) advanced_settings ;;
+    *) cancel ;;
+  esac
+
+  # In default mode the only choice that matters is storage, when several exist.
+  if [[ "$CHOICE" == "1" && ${#ROOT_STORAGES[@]} -gt 1 && -z "${STORAGE_PRESET:-}" ]]; then
+    STORAGE=$(pick_storage "Container storage" "$STORAGE" "${ROOT_STORAGES[@]}")
+  fi
+else
+  bold "BotPanel — Proxmox LXC installer (non-interactive)"
+fi
+
+info "Proxmox $(pveversion | cut -d/ -f2)"
+
+# Final safety checks, also for values that came from environment presets.
+pct status "$CTID" >/dev/null 2>&1 && fail "Container $CTID already exists. Choose a different ID."
+printf '%s\n' "${ROOT_STORAGES[@]}" | grep -qx "$STORAGE" \
+  || fail "Storage '$STORAGE' cannot hold containers. Options: ${ROOT_STORAGES[*]}"
+[[ "$DISK_GB$RAM_MB$SWAP_MB$CORES" =~ ^[0-9]+$ ]] || fail "Disk, memory, swap and cores must be numbers."
+if [[ "$NET_CONFIG" != "dhcp" ]]; then
+  valid_cidr "$NET_CONFIG" || fail "A static address needs CIDR form, for example 192.168.1.50/24."
+  [[ -z "$GATEWAY" ]] && GATEWAY="$(ip route | awk '/^default/ {print $3; exit}')"
+  valid_ipv4 "$GATEWAY" || fail "A valid gateway is required for a static address."
+fi
+
+if [[ "$INTERACTIVE" == "1" ]]; then
+  wt --title "Ready to create" --yes-button "Create" --no-button "Cancel" --yesno "\
+Create this container and install ${APP}?\n\n\
+  Container ID   ${CTID}\n\
+  Hostname       ${CT_HOSTNAME}\n\
+  Disk / Cores   ${DISK_GB} GB / ${CORES}\n\
+  Memory / Swap  ${RAM_MB} MB / ${SWAP_MB} MB\n\
+  Storage        ${STORAGE}\n\
+  Network        ${BRIDGE}, ${NET_CONFIG}$( [[ "$NET_CONFIG" != dhcp ]] && echo ", gw ${GATEWAY}" )$( [[ -n "$VLAN" ]] && echo ", VLAN ${VLAN}" )\n\
+  Type           $( [[ "$UNPRIVILEGED" == 1 ]] && echo unprivileged || echo privileged )\n\
+  Panel port     ${PANEL_PORT}" 21 62 || cancel
 fi
 
 # --- Template ----------------------------------------------------------------
+
+bold "Creating the ${APP} container"
+for line in \
+  "Container ID: ${CTID}" \
+  "Hostname: ${CT_HOSTNAME}" \
+  "Disk: ${DISK_GB} GB on ${STORAGE}" \
+  "Cores: ${CORES}   Memory: ${RAM_MB} MB   Swap: ${SWAP_MB} MB" \
+  "Network: ${BRIDGE}, ${NET_CONFIG}$( [[ "$NET_CONFIG" != dhcp ]] && echo ", gateway ${GATEWAY}" )$( [[ -n "$VLAN" ]] && echo ", VLAN ${VLAN}" )" \
+  "Type: $( [[ "$UNPRIVILEGED" == 1 ]] && echo unprivileged || echo privileged ), start on boot: $( [[ "$START_ON_BOOT" == 1 ]] && echo yes || echo no )"
+do ok "$line"; done
 
 info "Refreshing the template catalogue"
 pveam update >/dev/null 2>&1 || warn "Could not refresh the catalogue; using what is cached."
@@ -144,25 +311,6 @@ if [[ -z "$TEMPLATE_VOLUME" ]]; then
   TEMPLATE_VOLUME="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}"
 fi
 
-# --- Confirm -----------------------------------------------------------------
-
-bold "About to create container ${CTID}"
-cat <<EOF
-  Hostname     ${CT_HOSTNAME}
-  Template     ${TEMPLATE}
-  Storage      ${STORAGE}
-  Disk         ${DISK_GB} GB
-  Memory       ${RAM_MB} MB (swap ${SWAP_MB} MB)
-  Cores        ${CORES}
-  Network      ${BRIDGE}, ${NET_CONFIG}$( [[ "$NET_CONFIG" != dhcp ]] && echo ", gateway ${GATEWAY}" )
-  Unprivileged $( [[ "$UNPRIVILEGED" == 1 ]] && echo yes || echo no )
-EOF
-
-if [[ "$ASSUME_YES" != "1" && -t 0 ]]; then
-  read -rp $'\n  Create it? [Y/n]: ' confirm </dev/tty || true
-  [[ -z "$confirm" || "$confirm" =~ ^[Yy] ]] || fail "Cancelled."
-fi
-
 # --- Create ------------------------------------------------------------------
 
 NET_STRING="name=eth0,bridge=${BRIDGE}"
@@ -171,8 +319,8 @@ if [[ "$NET_CONFIG" == "dhcp" ]]; then
 else
   NET_STRING+=",ip=${NET_CONFIG},gw=${GATEWAY}"
 fi
+[[ -n "$VLAN" ]] && NET_STRING+=",tag=${VLAN}"
 
-bold "Creating the container"
 CREATE_ARGS=(
   "$CTID" "$TEMPLATE_VOLUME"
   --hostname "$CT_HOSTNAME"
@@ -188,6 +336,7 @@ CREATE_ARGS=(
 )
 [[ -n "$CT_PASSWORD" ]] && CREATE_ARGS+=(--password "$CT_PASSWORD")
 
+info "Creating the container"
 pct create "${CREATE_ARGS[@]}" >/dev/null || fail "Container creation failed."
 ok "Container ${CTID} created"
 

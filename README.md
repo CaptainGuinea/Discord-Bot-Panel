@@ -63,12 +63,16 @@ bash -c "$(wget -qO- https://raw.githubusercontent.com/CaptainGuinea/Discord-Bot
 
 <sub>Prefer curl? `bash -c "$(curl -fsSL https://raw.githubusercontent.com/CaptainGuinea/Discord-Bot-Panel/main/scripts/proxmox-lxc.sh)"`</sub>
 
-It asks for the container ID, storage, disk, memory, cores and network, showing
-sensible defaults you can accept with Enter — an unprivileged Debian container
-with 8 GB disk, 1 GB RAM, 2 cores and DHCP. It picks the next free container ID
-and downloads the Debian template only if your host does not already have it.
+It opens a dialog menu, just like the Proxmox community scripts. **Default
+Install** creates an unprivileged Debian container with 8 GB disk, 1 GB RAM,
+2 cores and DHCP on the next free container ID. **Advanced Install** walks you
+through every setting — ID, hostname, disk, cores, memory, swap, storage and
+bridge pick-lists, DHCP or a static address, VLAN tag, panel port, container
+type, start-on-boot and root password — validating each answer as you go. A
+summary screen asks for confirmation before anything is created, and the Debian
+template is downloaded only if your host does not already have it.
 
-Skip the questions entirely by presetting any of them:
+Skip the dialogs entirely by presetting values and adding `ASSUME_YES=1`:
 
 ```bash
 CTID=210 CT_HOSTNAME=bots DISK_GB=12 RAM_MB=2048 CORES=2 \
@@ -80,7 +84,7 @@ Afterwards: `pct enter <id>` for a shell, `pct exec <id> -- journalctl -u botpan
 for logs.
 
 > Use `bash -c "$(...)"` rather than piping into `bash`. Piping hands the script
-> to bash on stdin, which leaves nothing for the prompts to read from.
+> to bash on stdin, which leaves nothing for the dialogs to read from.
 
 ### Any VM, container or VPS — one line
 
