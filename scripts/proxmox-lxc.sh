@@ -284,15 +284,33 @@ do ok "$line"; done
 info "Refreshing the template catalogue"
 pveam update >/dev/null 2>&1 || warn "Could not refresh the catalogue; using what is cached."
 
+# The catalogue can list the same template for several CPU architectures
+# (amd64, arm64, ...). Only ever pick one that this host can actually run —
+# otherwise the container dies at boot with "Exec format error".
+case "$(uname -m)" in
+  x86_64)  TEMPLATE_ARCH="amd64" ;;
+  aarch64) TEMPLATE_ARCH="arm64" ;;
+  riscv64) TEMPLATE_ARCH="riscv64" ;;
+  *)       TEMPLATE_ARCH="" ;;
+esac
+
 pick_template() {
-  local prefix="$1"
-  pveam available --section system 2>/dev/null \
-    | awk '{print $2}' | grep "^${prefix}" | sort -V | tail -n1
+  local prefix="$1" list
+  list="$(pveam available --section system 2>/dev/null | awk '{print $2}' | grep "^${prefix}" || true)"
+  if [[ -n "$TEMPLATE_ARCH" ]]; then
+    # Prefer an arch-tagged match; fall back to untagged names only when the
+    # catalogue has no arch-specific entry at all.
+    if printf '%s\n' "$list" | grep -q "_${TEMPLATE_ARCH}\."; then
+      list="$(printf '%s\n' "$list" | grep "_${TEMPLATE_ARCH}\.")"
+    fi
+  fi
+  printf '%s\n' "$list" | sort -V | tail -n1
 }
 
 TEMPLATE="${TEMPLATE:-$(pick_template "$OS_TEMPLATE_PREFIX")}"
 [[ -n "$TEMPLATE" ]] || TEMPLATE="$(pick_template "$OS_TEMPLATE_FALLBACK")"
-[[ -n "$TEMPLATE" ]] || fail "No Debian template found in the catalogue."
+[[ -n "$TEMPLATE" ]] || fail "No Debian template for this host ($(uname -m)) found in the catalogue."
+info "Template ${TEMPLATE}"
 
 # template_ok <volume> — verify the archive is intact. A corrupt template
 # extracts into a rootfs whose binaries fail with "Exec format error" on start,

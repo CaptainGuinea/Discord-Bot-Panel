@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The Proxmox LXC installer picked the wrong CPU architecture when the
+  template catalogue lists several (for example `amd64` and `arm64` variants
+  on Proxmox VE 9.1): version-sorting made it grab the `arm64` template on
+  x86 hosts, and the container then failed to start with
+  `Exec format error - Failed to exec "/sbin/init"` (surfaced by Proxmox as
+  `sync_wait: 34 ... Failed to spawn container`). Templates are now filtered
+  by the host's architecture before the newest version is chosen.
+
 ### Changed
 
 - The Proxmox LXC installer now uses whiptail dialogs like the community
