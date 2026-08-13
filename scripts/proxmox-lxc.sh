@@ -294,13 +294,32 @@ TEMPLATE="${TEMPLATE:-$(pick_template "$OS_TEMPLATE_PREFIX")}"
 [[ -n "$TEMPLATE" ]] || TEMPLATE="$(pick_template "$OS_TEMPLATE_FALLBACK")"
 [[ -n "$TEMPLATE" ]] || fail "No Debian template found in the catalogue."
 
-# Reuse an already downloaded copy when there is one.
+# template_ok <volume> — verify the archive is intact. A corrupt template
+# extracts into a rootfs whose binaries fail with "Exec format error" on start,
+# which is almost impossible to trace back from the LXC error message.
+template_ok() {
+  local path
+  path="$(pvesm path "$1" 2>/dev/null)" || return 0   # cannot resolve: assume ok
+  [[ -f "$path" ]] || return 1
+  case "$path" in
+    *.zst) zstd -t -q "$path" >/dev/null 2>&1 ;;
+    *.xz)  xz   -t    "$path" >/dev/null 2>&1 ;;
+    *.gz)  gzip -t    "$path" >/dev/null 2>&1 ;;
+    *)     tar  -tf   "$path" >/dev/null 2>&1 ;;
+  esac
+}
+
+# Reuse an already downloaded copy when there is one, but only if it is intact.
 TEMPLATE_VOLUME=""
 for store in "${TEMPLATE_STORAGES[@]}"; do
   if pveam list "$store" 2>/dev/null | awk '{print $1}' | grep -q "/${TEMPLATE}$"; then
-    TEMPLATE_VOLUME="${store}:vztmpl/${TEMPLATE}"
-    info "Using cached template ${TEMPLATE}"
-    break
+    if template_ok "${store}:vztmpl/${TEMPLATE}"; then
+      TEMPLATE_VOLUME="${store}:vztmpl/${TEMPLATE}"
+      info "Using cached template ${TEMPLATE} (integrity check passed)"
+      break
+    fi
+    warn "Cached template on '${store}' is corrupt — deleting it"
+    pveam remove "${store}:vztmpl/${TEMPLATE}" >/dev/null 2>&1 || true
   fi
 done
 
@@ -309,6 +328,8 @@ if [[ -z "$TEMPLATE_VOLUME" ]]; then
   pveam download "$TEMPLATE_STORAGE" "$TEMPLATE" >/dev/null \
     || fail "Template download failed."
   TEMPLATE_VOLUME="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}"
+  template_ok "$TEMPLATE_VOLUME" \
+    || fail "The downloaded template failed its integrity check. The storage '${TEMPLATE_STORAGE}' may be faulty — retry with TEMPLATE_STORAGE=local (or another reliable storage)."
 fi
 
 # --- Create ------------------------------------------------------------------
@@ -340,8 +361,63 @@ info "Creating the container"
 pct create "${CREATE_ARGS[@]}" >/dev/null || fail "Container creation failed."
 ok "Container ${CTID} created"
 
+# --- Sanity-check the rootfs before starting -----------------------------------
+# Confirms /sbin/init exists and is an ELF binary for this host's architecture.
+# This turns the cryptic "sync_wait ... Failed to spawn container" start error
+# into a message that says what is actually wrong.
+
+verify_rootfs() {
+  local rootfs="/var/lib/lxc/${CTID}/rootfs" init target machine want i
+  pct mount "$CTID" >/dev/null 2>&1 || { warn "Could not mount the rootfs to inspect it; continuing."; return 0; }
+
+  init="${rootfs}/sbin/init"
+  for i in 1 2 3 4 5; do
+    [[ -L "$init" ]] || break
+    target="$(readlink "$init")"
+    if [[ "$target" == /* ]]; then
+      init="${rootfs}${target}"
+    else
+      init="$(dirname "$init")/${target}"
+    fi
+  done
+
+  if [[ ! -f "$init" ]]; then
+    pct unmount "$CTID" >/dev/null 2>&1 || true
+    fail "/sbin/init is missing inside the new container. The template extracted incompletely — the storage holding the template or the container volume is faulty. Delete the cached template and try TEMPLATE_STORAGE=local STORAGE=local."
+  fi
+
+  if [[ "$(od -An -tx1 -j0 -N4 "$init" 2>/dev/null | tr -d ' \n')" != "7f454c46" ]]; then
+    pct unmount "$CTID" >/dev/null 2>&1 || true
+    fail "/sbin/init inside the container is not a valid ELF binary — the template data is corrupt. Delete the cached template and re-run with TEMPLATE_STORAGE=local."
+  fi
+
+  case "$(uname -m)" in
+    aarch64) want="b700" ;;
+    x86_64)  want="3e00" ;;
+    riscv64) want="f300" ;;
+    armv7l)  want="2800" ;;
+    *)       want="" ;;
+  esac
+  machine="$(od -An -tx1 -j18 -N2 "$init" 2>/dev/null | tr -d ' \n')"
+  pct unmount "$CTID" >/dev/null 2>&1 || true
+
+  if [[ -n "$want" && "$machine" != "$want" ]]; then
+    fail "The container's binaries do not match this host's CPU architecture ($(uname -m)). The template '${TEMPLATE}' is for a different machine type — it cannot run here."
+  fi
+  ok "Rootfs check passed (/sbin/init is a valid $(uname -m) binary)"
+}
+verify_rootfs
+
 info "Starting it"
-pct start "$CTID" >/dev/null || fail "The container did not start."
+if ! pct start "$CTID" >/dev/null 2>&1; then
+  DEBUG_LOG="/tmp/lxc-${CTID}-debug.log"
+  warn "The container did not start. Collecting the LXC debug log"
+  timeout 30 lxc-start -n "$CTID" -F -l DEBUG -o "$DEBUG_LOG" >/dev/null 2>&1 || true
+  if [[ -s "$DEBUG_LOG" ]]; then
+    grep -iE 'ERROR' "$DEBUG_LOG" | tail -n 8 | sed 's/^/    /' || true
+  fi
+  fail "Startup failed. Full debug log: ${DEBUG_LOG}"
+fi
 
 # --- Wait for the network ----------------------------------------------------
 

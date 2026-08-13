@@ -14,6 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   confirmation summary before the container is created. Previously a stray
   answer such as `y` to a value prompt reached `pct create` unchecked and
   failed with "Parameter verification failed".
+- The Proxmox LXC installer verifies template archives before using them
+  (deleting and re-downloading corrupt cached copies), checks that the new
+  container's `/sbin/init` is a valid binary for the host architecture before
+  starting it, and collects an LXC debug log automatically when a start fails.
+  Previously a corrupt template — for example from a flaky USB drive — was
+  reused forever and every container built from it failed with the opaque
+  "sync_wait: 34 ... Failed to spawn container" error.
 
 ## [1.0.0] — 2026-08-12
 
