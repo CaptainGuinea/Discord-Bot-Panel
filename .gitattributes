@@ -1,0 +1,15 @@
+# Keep line endings LF everywhere. A shell script checked out with CRLF fails on
+# Linux with a confusing "bad interpreter" error, and the installers are the
+# first thing anyone runs.
+* text=auto eol=lf
+
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.js        text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.md        text eol=lf
+*.css       text eol=lf
+*.html      text eol=lf
+
+package-lock.json -diff linguist-generated

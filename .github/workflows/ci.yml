@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+
+      - name: Boot the panel and hit the health endpoint
+        run: |
+          PORT=8099 DATA_DIR=./ci-data node src/server.js &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8099/api/health >/dev/null 2>&1; then
+              echo "panel is up"
+              curl -fsS http://127.0.0.1:8099/api/health
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "panel did not become healthy" >&2
+          exit 1
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: |
+          for script in install.sh scripts/*.sh; do
+            bash -n "$script" && echo "ok $script"
+          done
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=warning install.sh scripts/*.sh
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: botpanel:ci

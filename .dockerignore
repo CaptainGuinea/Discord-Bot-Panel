@@ -1,0 +1,15 @@
+node_modules
+data
+.git
+.github
+.env
+*.log
+Dockerfile
+docker-compose.yml
+install.sh
+README.md
+CONTRIBUTING.md
+SECURITY.md
+CHANGELOG.md
+LICENSE
+docs

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="Self-hosted control panel for Discord bots." />
+  <title>BotPanel</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%236366f1'/><circle cx='36' cy='45' r='7' fill='white'/><circle cx='64' cy='45' r='7' fill='white'/><rect x='32' y='64' width='36' height='6' rx='3' fill='white'/></svg>" />
+  <link rel="stylesheet" href="__ASSET_BASE__/css/app.css" />
+</head>
+<body>
+
+<!-- Icon sprite: stroke-based, 24x24 grid. -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4.5v15l13-7.5z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6"/><path d="M20 4v7h-7"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M5 15c-1 2-1 5-1 5s3 0 5-1"/><path d="M14.5 4.5C17 2 21 3 21 3s1 4-1.5 6.5L14 15l-5-5z"/><path d="M9 10l5 5"/><circle cx="16" cy="8" r="1.2"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5"/><path d="M13 17h6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9"/><path d="M17 12v4"/><path d="M20 12v3"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="5" r="2.5"/><circle cx="7" cy="19" r="2.5"/><circle cx="17" cy="9" r="2.5"/><path d="M7 7.5v9"/><path d="M17 11.5c0 3-4 2.5-6 5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 21h16"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.9 5.2A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1"/><path d="M6.5 7.5A17 17 0 0 0 2 12s3.6 7 10 7a10 10 0 0 0 4-.8"/><path d="M3 3l18 18"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 8h.01"/><path d="M7 17h.01"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 2v4"/><path d="M14 2v4"/><path d="M10 18v4"/><path d="M14 18v4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M18 10h4"/><path d="M18 14h4"/></symbol>
+  <symbol id="i-memory" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="11" rx="2"/><path d="M6 18v3"/><path d="M12 18v3"/><path d="M18 18v3"/><path d="M7 11v3"/><path d="M12 11v3"/><path d="M17 11v3"/></symbol>
+  <symbol id="i-disk" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4"/><circle cx="9" cy="14" r="1.2"/><circle cx="15" cy="14" r="1.2"/><path d="M2 13v3"/><path d="M22 13v3"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></symbol>
+</svg>
+
+<!-- ── Auth gate ─────────────────────────────────────────────────────────── -->
+<div id="gate" class="gate" hidden>
+  <div class="gate-glow" aria-hidden="true"></div>
+  <form id="gate-form" class="gate-card" autocomplete="on">
+    <div class="gate-mark"><svg class="icon"><use href="#i-bot"/></svg></div>
+    <h1 id="gate-title">Welcome back</h1>
+    <p id="gate-sub" class="muted">Sign in to your panel.</p>
+
+    <label class="field">
+      <span>Username</span>
+      <input id="gate-username" name="username" autocomplete="username" required autofocus />
+    </label>
+
+    <label class="field" id="gate-email-field" hidden>
+      <span>Email <em class="muted">optional</em></span>
+      <input id="gate-email" name="email" type="email" autocomplete="email" />
+    </label>
+
+    <label class="field">
+      <span>Password</span>
+      <input id="gate-password" name="password" type="password" autocomplete="current-password" required />
+    </label>
+
+    <p id="gate-error" class="gate-error" hidden></p>
+    <button id="gate-submit" class="btn btn-primary btn-block" type="submit">Sign in</button>
+    <p class="gate-alt center" hidden id="gate-alt">
+      <a href="#" id="gate-toggle"></a>
+    </p>
+    <p class="gate-foot muted" id="gate-foot"></p>
+  </form>
+</div>
+
+<!-- ── App shell ─────────────────────────────────────────────────────────── -->
+<div id="app" class="shell" hidden>
+  <aside class="sidebar">
+    <a class="brand" href="#/">
+      <span class="brand-mark"><svg class="icon"><use href="#i-bot"/></svg></span>
+      <span class="brand-text"><span id="brand-name">BotPanel</span><em id="ws-dot" class="ws-dot" title="Realtime connection"></em></span>
+    </a>
+
+    <nav class="nav">
+      <a class="nav-item" href="#/" data-nav="overview"><svg class="icon"><use href="#i-grid"/></svg>Overview</a>
+      <a class="nav-item" href="#/activity" data-nav="activity"><svg class="icon"><use href="#i-activity"/></svg>Activity</a>
+      <a class="nav-item" href="#/settings" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg>Settings</a>
+      <a class="nav-item" href="#/admin" data-nav="admin" id="nav-admin" hidden><svg class="icon"><use href="#i-server"/></svg>Administration</a>
+    </nav>
+
+    <div class="side-head">
+      <span>Bots</span>
+      <button class="icon-btn" id="side-new" title="New bot (N)" hidden><svg class="icon"><use href="#i-plus"/></svg></button>
+    </div>
+    <div id="side-bots" class="side-bots"></div>
+
+    <div class="side-foot">
+      <button class="side-user" id="open-palette" title="Command palette (Ctrl+K)">
+        <svg class="icon"><use href="#i-search"/></svg>
+        <span>Search</span>
+        <kbd>⌘K</kbd>
+      </button>
+      <div class="side-account">
+        <span id="who" class="muted"></span>
+        <button class="icon-btn" id="logout" title="Sign out"><svg class="icon"><use href="#i-logout"/></svg></button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div id="crumbs" class="crumbs"></div>
+      <div id="host-strip" class="host-strip"></div>
+    </header>
+    <div id="view" class="view"></div>
+  </main>
+</div>
+
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+<div id="modal-root"></div>
+
+<div id="palette" class="palette" hidden>
+  <div class="palette-box">
+    <div class="palette-input">
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input id="palette-q" placeholder="Jump to a bot, or run a command…" autocomplete="off" spellcheck="false" />
+      <kbd>esc</kbd>
+    </div>
+    <div id="palette-list" class="palette-list"></div>
+  </div>
+</div>
+
+<script type="module" src="__ASSET_BASE__/js/app.js"></script>
+</body>
+</html>

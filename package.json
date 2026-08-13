@@ -1,0 +1,29 @@
+{
+  "name": "botpanel",
+  "version": "1.0.0",
+  "description": "Self-hosted control panel for Discord bots: process supervision, Git deploys and live consoles.",
+  "type": "module",
+  "main": "src/server.js",
+  "license": "MIT",
+  "keywords": [
+    "discord",
+    "discord-bot",
+    "self-hosted",
+    "process-manager",
+    "control-panel",
+    "homelab"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node scripts/check.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

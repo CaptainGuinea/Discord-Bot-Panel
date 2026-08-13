@@ -1,0 +1,22 @@
+services:
+  botpanel:
+    build: .
+    # Or use a published image instead of building:
+    # image: ghcr.io/CaptainGuinea/Discord-Bot-Panel:latest
+    container_name: botpanel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - botpanel-data:/data
+    environment:
+      # Everything here is optional. See .env.example for the full list.
+      # TZ: Europe/London
+      # INSTANCE_NAME: My Bots
+      # PUBLIC_URL: https://bots.example.com
+      # SECURE_COOKIES: "1"
+      # TRUST_PROXY: "1"
+      TZ: UTC
+
+volumes:
+  botpanel-data:
