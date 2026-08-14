@@ -197,13 +197,20 @@ function hexToRgba(hex, alpha) {
 /** Compact trend line for cards. Values are plain numbers. */
 export function sparkline(values, { color = '#818cf8', height = 34 } = {}) {
   const series = (values ?? []).filter((value) => Number.isFinite(value));
-  if (series.length < 2) {
+  const peak = series.length > 0 ? Math.max(...series) : 0;
+
+  // An idle bot produces a run of zeros. Drawing that as a full-strength line
+  // puts a bright accent rule across the card that reads as a divider, so a
+  // flat or empty series gets a deliberately quiet placeholder instead.
+  if (series.length < 2 || peak <= 0) {
     return `<svg class="spark" viewBox="0 0 100 ${height}" preserveAspectRatio="none" aria-hidden="true">
-      <line x1="0" y1="${height - 1}" x2="100" y2="${height - 1}" stroke="${color}" stroke-opacity=".25" stroke-width="1" vector-effect="non-scaling-stroke"/>
+      <line x1="0" y1="${height - 1}" x2="100" y2="${height - 1}"
+        stroke="currentColor" stroke-opacity=".12" stroke-width="1"
+        stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/>
     </svg>`;
   }
 
-  const max = Math.max(...series, 1);
+  const max = Math.max(peak, 1);
   const step = 100 / (series.length - 1);
   const toY = (value) => height - 2 - (value / max) * (height - 5);
 

@@ -90,7 +90,10 @@ app.use('/hooks', webhookRouter);
  * stale, while index.html — which carries the current version — is always
  * revalidated.
  */
-const ASSET_BASE = `/assets/${config.version}`;
+// In development the token changes every boot, so a restart is enough to pick
+// up edited CSS or JS instead of fighting a year-long immutable cache.
+const ASSET_TOKEN = process.env.NODE_ENV === 'production' ? config.version : `dev-${Date.now()}`;
+const ASSET_BASE = `/assets/${ASSET_TOKEN}`;
 
 app.use(`${ASSET_BASE}`, express.static(PUBLIC_DIR, {
   index: false,

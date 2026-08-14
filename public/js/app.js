@@ -1435,6 +1435,11 @@ async function tabMetrics(body, bot) {
     const cpuPoints = [...data.stored, ...data.live].map((point) => ({ ts: point.ts, value: point.cpu }));
     const memPoints = [...data.stored, ...data.live].map((point) => ({ ts: point.ts, value: point.mem }));
 
+    // A mostly idle bot spans well under a percent, where whole numbers would
+    // render as a column of identical "0%" labels.
+    const cpuPeak = Math.max(...cpuPoints.map((point) => point.value), 0);
+    const cpuDecimals = cpuPeak < 5 ? 1 : 0;
+
     body.innerHTML = `
       <div class="tiles">
         <div class="tile"><div class="t-label">${icon('cpu')}CPU now</div><div class="t-value">${(snapshot.cpu ?? 0).toFixed(1)}<small>%</small></div><div class="t-sub">of one core</div></div>
@@ -1453,7 +1458,7 @@ async function tabMetrics(body, bot) {
               <option value="168" ${hours === 168 ? 'selected' : ''}>Last week</option>
             </select>
           </div>
-          <div class="card-body">${areaChart(cpuPoints, { color, format: (v) => `${v.toFixed(0)}%`, label: 'CPU over time' })}</div>
+          <div class="card-body">${areaChart(cpuPoints, { color, format: (v) => `${v.toFixed(cpuDecimals)}%`, label: 'CPU over time' })}</div>
         </div>
         <div class="card">
           <div class="card-head"><h2>Memory</h2></div>
@@ -1483,8 +1488,8 @@ function tabSettings(body, bot) {
     .join('');
 
   const accentSwatches = state.accents
-    .map((accent) => `<button type="button" class="icon-btn" data-accent="${esc(accent)}" title="${esc(accent)}"
-        style="background:${accentHex(accent)};width:22px;height:22px;border-radius:7px;${accent === bot.accent ? 'outline:2px solid var(--text);outline-offset:2px' : ''}"></button>`)
+    .map((accent) => `<button type="button" class="swatch" data-accent="${esc(accent)}" title="${esc(accent)}"
+        aria-pressed="${accent === bot.accent}" style="background:${accentHex(accent)}"></button>`)
     .join('');
 
   body.innerHTML = `
@@ -1582,9 +1587,8 @@ function tabSettings(body, bot) {
   let accent = bot.accent;
   on($('#s-accents'), 'click', '[data-accent]', (_ev, button) => {
     accent = button.dataset.accent;
-    for (const swatch of $$('#s-accents [data-accent]')) {
-      swatch.style.outline = swatch.dataset.accent === accent ? '2px solid var(--text)' : '';
-      swatch.style.outlineOffset = '2px';
+    for (const swatch of $$('#s-accents .swatch')) {
+      swatch.setAttribute('aria-pressed', String(swatch.dataset.accent === accent));
     }
   });
 
